@@ -145,6 +145,13 @@ python test_mil.py --yaml_path /configs/AB_MIL.yaml --test_dataset_csv /your/tes
 ```
 You should ensure the `--test_dataset_csv` contains the column of `test_slide_path` which contains the `/path/to/your_pt.pt`. If `--test_dataset_csv` also contains the 'test_slide_label' column, the metrics will be calculated and written to logs.
 
+#### **Hyper-Parameter Optimisation (Optuna)**
+We provide an optional Optuna-based tuning workflow that keeps the original training scripts untouched. Configure the `Tuning` block in your yaml file (see `configs/MEAN_MIL.yaml` for a reference template) and set `enabled: True`. Each search space key corresponds to a dotted path in the yaml configuration and accepts common Optuna sampling strategies (`float`, `loguniform`, `int`, `categorical`, ...). Launch tuning with the usual entry point:
+``` shell
+python train_mil.py --yaml_path /configs/MEAN_MIL.yaml
+```
+All trial logs, best metrics and the Optuna study CSV will be saved under `<log_root_dir>/<dataset>/<model>/tuning/<study_name>/`.
+
 
 ### :fountain: **Visualization**
 You can easily visualize the dimensionality reduction map of the features from the trained MIL model and the distribution of attention scores (or importance scores) by `/vis_scripts/draw_feature_map.py` and `/vis_scripts/draw_attention_map.py`. We have implemented standardized global feature and attention score output interfaces for most models, making the above visualization scripts compatible with most MIL model in the library. The detailed usage instructions are in `/vis_scripts/README.md`.

@@ -1,10 +1,58 @@
 import argparse
-from utils.yaml_utils import read_yaml,update_config_from_options
+from utils.yaml_utils import read_yaml, update_config_from_options
 from process.process_all import process
 import warnings
 import os
-from utils.general_utils import get_time,merge_k_fold_logs
+from utils.general_utils import get_time, merge_k_fold_logs
 warnings.filterwarnings('ignore')
+
+
+def _ensure_log_subdir(args):
+    log_root_dir = args.Logs.log_root_dir
+    os.makedirs(log_root_dir, exist_ok=True)
+    sub_dir = os.path.join(log_root_dir, args.Dataset.DATASET_NAME, args.General.MODEL_NAME)
+    os.makedirs(sub_dir, exist_ok=True)
+    return sub_dir
+
+
+def _run_single_training(args, yaml_path, options):
+    if args.Dataset.dataset_root_dir == {} and args.Dataset.dataset_csv_path is not None:
+        """
+        None-fold split
+        """
+        sub_dir = _ensure_log_subdir(args)
+        args.Logs.now_log_dir = os.path.join(
+            sub_dir,
+            f'time_{get_time()}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}'
+        )
+        process(args, yaml_path, options)
+
+    else:
+        """
+        k-fold split
+        """
+        dataset_root_dir = args.Dataset.dataset_root_dir
+        k_fold_csv_paths = sorted([os.path.join(dataset_root_dir, path) for path in os.listdir(dataset_root_dir)])
+        process_time = get_time()
+        sub_dir = _ensure_log_subdir(args)
+        for k_idx, k_fold_csv_path in enumerate(k_fold_csv_paths):
+            args.Dataset.dataset_csv_path = k_fold_csv_path
+            now_fold = k_idx + 1
+            args.Dataset.now_fold = now_fold
+            fold_dir = f'fold_{now_fold}'
+            args.Logs.now_log_dir = os.path.join(
+                sub_dir,
+                f'time_{process_time}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}/{fold_dir}'
+            )
+            os.makedirs(args.Logs.now_log_dir, exist_ok=True)
+            process(args, yaml_path, options)
+            print(f'K-Fold:{k_idx + 1} Done!')
+        fold_total_log_dir = os.path.join(
+            sub_dir,
+            f'time_{process_time}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}'
+        )
+        merge_k_fold_logs(fold_total_log_dir, args.General.process_pipeline)
+
 
 def main(arg):
     yaml_path = arg.yaml_path
@@ -12,42 +60,16 @@ def main(arg):
     args = read_yaml(yaml_path)
     # dinamically update the config file with the options
     if arg.options:
-        args = update_config_from_options(args,arg.options)
-    
-    if args.Dataset.dataset_root_dir == {} and args.Dataset.dataset_csv_path != None:
-        '''
-        None-fold split
-        '''
-        log_root_dir = args.Logs.log_root_dir
-        os.makedirs(log_root_dir,exist_ok=True)
-        sub_dir = os.path.join(log_root_dir,args.Dataset.DATASET_NAME,args.General.MODEL_NAME)
-        os.makedirs(sub_dir,exist_ok=True)
-        args.Logs.now_log_dir = os.path.join(sub_dir,f'time_{get_time()}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}')
-        process(args,yaml_path,arg.options)
+        args = update_config_from_options(args, arg.options)
 
+    tuning_enabled = hasattr(args, 'Tuning') and args.Tuning and getattr(args.Tuning, 'enabled', False)
+    if tuning_enabled:
+        from utils.tuning.optuna_runner import OptunaTuner
+
+        tuner = OptunaTuner(args, yaml_path, arg.options)
+        tuner.optimize()
     else:
-        '''
-        k-fold split
-        '''
-        dataset_root_dir = args.Dataset.dataset_root_dir
-        k_fold_csv_paths = sorted([os.path.join(dataset_root_dir,path) for path in os.listdir(dataset_root_dir)])
-        process_time = get_time()
-        for k_idx,k_fold_csv_path in enumerate(k_fold_csv_paths):
-            args.Dataset.dataset_csv_path = k_fold_csv_path
-            now_fold = k_idx+1
-            args.Dataset.now_fold = now_fold
-            log_root_dir = args.Logs.log_root_dir
-            os.makedirs(log_root_dir,exist_ok=True)
-            sub_dir = os.path.join(log_root_dir,args.Dataset.DATASET_NAME,args.General.MODEL_NAME)
-            os.makedirs(sub_dir,exist_ok=True)
-            if now_fold != None:
-                fold_dir = f'fold_{now_fold}'
-                args.Logs.now_log_dir = os.path.join(sub_dir,f'time_{process_time}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}/{fold_dir}')
-            os.makedirs(args.Logs.now_log_dir,exist_ok=True)
-            process(args,yaml_path,arg.options)
-            print(f'K-Fold:{k_idx+1} Done!')
-        fold_total_log_dir = os.path.join(sub_dir,f'time_{process_time}_{args.Dataset.DATASET_NAME}_{args.General.MODEL_NAME}_seed_{args.General.seed}')
-        merge_k_fold_logs(fold_total_log_dir,args.General.process_pipeline)
+        _run_single_training(args, yaml_path, arg.options)
         
         
 if __name__ == '__main__':
